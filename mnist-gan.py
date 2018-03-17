@@ -22,16 +22,17 @@ def write_log(callback, names, logs, batch_no):
 
 def create_generator(input_shape):
     alpha = 2
+    base = 16
 
     input_vec = Input(input_shape, name='input')
     x = Dense(128*7*7, activation='tanh', name='dense')(input_vec)
     x = BatchNormalization()(x)
     x = Reshape((7, 7, 128))(x)
-    x = Conv2D(16 * alpha**2, (3, 3), activation='tanh', padding='same', name='conv_1')(x)
-    x = Conv2DTranspose(64, (3, 3), strides=(2, 2), activation='tanh', padding='same', name='deconv_1')(x)
-    x = Conv2D(16 * alpha, (3, 3), activation='tanh', padding='same', name='conv_2')(x)
-    x = Conv2DTranspose(32, (3, 3), strides=(2, 2), activation='tanh', padding='same', name='deconv_2')(x)
-    x = Conv2D(16, (3, 3), activation='tanh', padding='same', name='conv_3')(x)
+    x = Conv2D(base * alpha**2, (3, 3), activation='relu', padding='same', name='conv_1')(x)
+    x = UpSampling2D()(x)
+    x = Conv2D(base * alpha, (3, 3), activation='relu', padding='same', name='conv_2')(x)
+    x = UpSampling2D()(x)
+    x = Conv2D(base, (3, 3), activation='relu', padding='same', name='conv_3')(x)
     output = Conv2D(1, (3, 3), activation='tanh', padding='same', name='conv_4')(x)
 
     model = Model(input_vec, outputs=output)
@@ -41,18 +42,19 @@ def create_generator(input_shape):
 
 def create_discriminator(input_shape=(28, 28, 1)):
     alpha = 2
+    base = 16
 
     input_vec = Input(input_shape, name='input')
-    x = Conv2D(16, (3, 3), activation='tanh', padding='same', name='d_conv_1')(input_vec)
+    x = Conv2D(base, (3, 3), activation='relu', padding='same', name='d_conv_1')(input_vec)
     x = MaxPool2D((2, 2), padding='same')(x)
-    x = Conv2D(16 * alpha, (3, 3), activation='tanh', padding='same', name='d_conv_2')(x)
+    x = Conv2D(base * alpha, (3, 3), activation='relu', padding='same', name='d_conv_2')(x)
     x = MaxPool2D((2, 2), padding='same')(x)
-    x = Conv2D(16 * alpha**2, (3, 3), activation='tanh', padding='same', name='d_conv_3')(x)
+    x = Conv2D(base * alpha**2, (3, 3), activation='relu', padding='same', name='d_conv_3')(x)
     x = Flatten()(x)
     output = Dense(1, activation='sigmoid')(x)
 
     model = Model(input_vec, outputs=output)
-    model.compile(loss='binary_crossentropy', optimizer='adadelta')
+    model.compile(loss='binary_crossentropy', optimizer='adam')
 
     return model
 
@@ -72,7 +74,7 @@ def create_gan(input_size):
 
     gan = Model(input_vec, outputs=output)
 
-    gan.compile(loss='binary_crossentropy', optimizer='adadelta')
+    gan.compile(loss='binary_crossentropy', optimizer='adam')
     return gan, discriminator, generator
 
 
@@ -103,7 +105,6 @@ def train(input_size, batch_size, epochs, log_dir, pred_dir, model_dir):
         os.makedirs(model_dir)
 
     gan, discriminator, generator = create_gan(input_size)
-
     (x_train_mnist, y_train_mnist), (x_test_mnist, y_test_mnist) = mnist.load_data()
 
     # Normalize mnist data between -1 and 1
@@ -112,6 +113,7 @@ def train(input_size, batch_size, epochs, log_dir, pred_dir, model_dir):
 
     batch_size = batch_size // 2
     y_batch_ones_generator = np.ones([batch_size*2, 1])
+    y_batch_zeros = np.zeros([batch_size, 1])
 
     callback = TensorBoard(log_dir=log_dir)
     callback.set_model(gan)
@@ -127,8 +129,7 @@ def train(input_size, batch_size, epochs, log_dir, pred_dir, model_dir):
             x_batch_generator = generator.predict_on_batch(noise_batch)
 
             # Train discriminator with label smoothing
-            y_batch_ones = create_random_vectors(batch_size, 1, min=0.7, max=1)
-            y_batch_zeros = create_random_vectors(batch_size, 1, min=0, max=0.3)
+            y_batch_ones = create_random_vectors(batch_size, 1, min=0.6, max=1)
 
             discriminator_loss = discriminator.train_on_batch(
                 np.concatenate((x_batch_mnist, x_batch_generator)),
@@ -154,7 +155,7 @@ if __name__ == "__main__":
         '-b', '--batch-size', type=int, default=128,
         help='Batch size')
     parser.add_argument(
-        '-e', '--epochs', type=int, default=50,
+        '-e', '--epochs', type=int, default=100,
         help='Number of epochs to train')
     parser.add_argument(
         '-l', '--log-dir', default='./log',
