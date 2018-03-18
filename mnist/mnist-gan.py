@@ -7,6 +7,7 @@ import tensorflow as tf
 import numpy as np
 import argparse
 import imageio
+import glob
 import os
 
 
@@ -59,16 +60,13 @@ def create_discriminator(input_shape=(28, 28, 1)):
     return model
 
 
-def set_trainable(model, trainable):
-    for layer in model.layers:
-        layer.trainable = trainable
-
-
 def create_gan(input_size):
     generator = create_generator((input_size,))
     discriminator = create_discriminator()
 
-    set_trainable(discriminator, False)
+    for layer in discriminator.layers:
+        layer.trainable = False
+
     input_vec = Input((input_size,), name='input')
     output = discriminator(generator(input_vec))
 
@@ -82,23 +80,28 @@ def create_random_vectors(samples, size, min=-1, max=1):
     return np.random.uniform(min, max, size=(samples, size))
 
 
-def validate(generator, epoch, input_size, pred_dir):
+def save_predictions(generator, epoch, input_size, pred_dir):
     img_size = 28
+    sqrt_samples = 10
 
-    samples = create_random_vectors(25, input_size)
+    samples = create_random_vectors(sqrt_samples**2, input_size)
     pred = generator.predict_on_batch(samples)
 
-    img = np.zeros((img_size*5, img_size*5, 1), dtype=np.uint8)
+    img = np.zeros((img_size*sqrt_samples, img_size*sqrt_samples, 1), dtype=np.uint8)
     for i, p in enumerate(pred):
         img[
-            (i // 5)*img_size: ((i // 5)+1)*img_size,
-            (i % 5)*img_size: ((i % 5) + 1)*img_size, :] = np.array((p * 127.5) + 127.5, dtype=np.uint8)
+            (i // sqrt_samples)*img_size: ((i // sqrt_samples)+1)*img_size,
+            (i % sqrt_samples)*img_size: ((i % sqrt_samples) + 1)*img_size, :] = np.array((p * 127.5) + 127.5, dtype=np.uint8)
 
     imageio.imwrite(os.path.join(pred_dir, 'pred%d.png' % epoch), img)
     return
 
 
-def train(input_size, batch_size, epochs, log_dir, pred_dir, model_dir):
+def train(input_size, batch_size, epochs, output_dir):
+    pred_dir = os.path.join(output_dir, 'predictions')
+    model_dir = os.path.join(output_dir, 'models')
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
     if not os.path.exists(pred_dir):
         os.makedirs(pred_dir)
     if not os.path.exists(model_dir):
@@ -115,7 +118,7 @@ def train(input_size, batch_size, epochs, log_dir, pred_dir, model_dir):
     y_batch_ones_generator = np.ones([batch_size*2, 1])
     y_batch_zeros = np.zeros([batch_size, 1])
 
-    callback = TensorBoard(log_dir=log_dir)
+    callback = TensorBoard(log_dir=os.path.join(output_dir, 'log'))
     callback.set_model(gan)
 
     step = 0
@@ -129,7 +132,7 @@ def train(input_size, batch_size, epochs, log_dir, pred_dir, model_dir):
             x_batch_generator = generator.predict_on_batch(noise_batch)
 
             # Train discriminator with label smoothing
-            y_batch_ones = create_random_vectors(batch_size, 1, min=0.6, max=1)
+            y_batch_ones = create_random_vectors(batch_size, 1, min=0.55, max=1)
 
             discriminator_loss = discriminator.train_on_batch(
                 np.concatenate((x_batch_mnist, x_batch_generator)),
@@ -142,8 +145,27 @@ def train(input_size, batch_size, epochs, log_dir, pred_dir, model_dir):
                 callback, ['discriminator_train_loss', 'generator_train_loss'],
                 [discriminator_loss, generator_loss], step)
             step += 1
-        gan.save(os.path.join(model_dir, 'gan_%d.h5' % e))
-        validate(generator, e, input_size, pred_dir)
+        discriminator.save(os.path.join(model_dir, 'discriminator_%d.h5' % e))
+        generator.save(os.path.join(model_dir, 'generator_%d.h5' % e))
+
+        save_predictions(generator, e, input_size, pred_dir)
+    generate_gif(pred_dir, output_dir)
+
+
+def generate_gif(pred_dir, output_dir):
+    def atoi(text):
+        return int(text) if text.isdigit() else text
+
+    def natural_keys(text):
+        import re
+        return [atoi(c) for c in re.split('(\d+)', text)]
+
+    images = []
+    img_paths = glob.glob(pred_dir + '/*.png')
+    img_paths.sort(key=natural_keys)
+    for img_path in img_paths[::9]:
+        images.append(imageio.imread(img_path))
+    imageio.mimsave(os.path.join(output_dir, 'mnist_training.gif'), images, duration=1)
 
 
 if __name__ == "__main__":
@@ -158,18 +180,11 @@ if __name__ == "__main__":
         '-e', '--epochs', type=int, default=100,
         help='Number of epochs to train')
     parser.add_argument(
-        '-l', '--log-dir', default='./log',
-        help='Directory for tensorboard logs')
-    parser.add_argument(
-        '-p', '--pred-dir', default='./preds',
-        help='Directory for generator predictions (one after each epoch)')
-    parser.add_argument(
-        '-m', '--model-dir', default='./models',
-        help='Directory to save models')
+        '-o', '--output-dir', default='./output',
+        help='Output directory for logs, predictions and models')
 
     args = parser.parse_args()
     print(args)
 
     train(
-        args.input_size, args.batch_size, args.epochs,
-        args.log_dir, args.pred_dir, args.model_dir)
+        args.input_size, args.batch_size, args.epochs, args.output_dir)
