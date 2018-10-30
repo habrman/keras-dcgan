@@ -146,36 +146,37 @@ def train(x_train_real, input_size, batch_size, epochs, output_dir, create_gener
     callback.set_model(gan)
 
     indices = np.arange(x_train_real.shape[0])
-    np.random.shuffle(indices)
-    batch_indices = [indices[i:i + batch_size] for i in range(0, len(indices), batch_size)]
 
     step = 0
     for e in range(epochs):
         print('Epoch: %d/%d' % (e + 1, epochs))
+        np.random.shuffle(indices)
+        batch_indices = [indices[i:i + batch_size] for i in range(0, len(indices), batch_size)]
+        discriminator.save(os.path.join(model_dir, 'discriminator_%d.h5' % e))
+        generator.save(os.path.join(model_dir, 'generator_%d.h5' % e))
 
-        for indices in tqdm(batch_indices):
+        for i in tqdm(batch_indices):
             # Create batch data
-            x_batch_real = x_train_real[indices]
-            noise_batch = create_noise_batch(len(indices), input_size)
+            x_batch_real = x_train_real[i]
+            noise_batch = create_noise_batch(len(i), input_size)
             x_batch_generator = generator.predict_on_batch(noise_batch)
 
             # Train discriminator with label smoothing
-            y_batch_ones = np.random.uniform(0.8, 1, size=(len(indices), 1))
+            y_batch_ones = np.random.uniform(0.8, 1, size=(len(i), 1))
 
             discriminator_loss_m = discriminator.train_on_batch(x_batch_real, y_batch_ones)
-            discriminator_loss_g = discriminator.train_on_batch(x_batch_generator, y_batch_zeros[:len(indices)])
+            discriminator_loss_g = discriminator.train_on_batch(x_batch_generator, y_batch_zeros[:len(i)])
             discriminator_loss = (discriminator_loss_m + discriminator_loss_g) / 2
 
             # Train generator
-            for _ in range(2):
-                noise_batch = create_noise_batch(len(indices), input_size)
-                generator_loss = gan.train_on_batch(noise_batch, y_batch_ones_generator[:len(indices)])
+            noise_batch = create_noise_batch(len(i), input_size)
+            generator_loss = gan.train_on_batch(noise_batch, y_batch_ones_generator[:len(i)])
             write_log(
                 callback, ['discriminator_train_loss', 'generator_train_loss'],
                 [discriminator_loss, generator_loss], step)
-            step += 1
             if step % 100 == 0:
                 save_predictions(generator, e, step, input_size, pred_dir)
+            step += 1
 
         discriminator.save(os.path.join(model_dir, 'discriminator_%d.h5' % e))
         generator.save(os.path.join(model_dir, 'generator_%d.h5' % e))
