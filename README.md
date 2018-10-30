@@ -20,3 +20,6 @@ Both scripts create an output folder containing models for each epoch,  predicti
 
 ## MNIST training evolution
 ![alt text](https://github.com/habrman/keras-dcgan/blob/master/assets/mnist_training_example.gif)
+
+## Fashion MNIST training evolution
+![alt text](https://github.com/habrman/keras-dcgan/blob/master/assets/fashion_mnist_training_example.gif)
